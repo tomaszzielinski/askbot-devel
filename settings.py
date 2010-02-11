@@ -11,7 +11,6 @@ SECRET_KEY = '$oo^&_m&qwbib=(_4m_n*zn-d=g#s0he5fx9xonnym#8p6yigm'
 TEMPLATE_LOADERS = (
     'django.template.loaders.filesystem.load_template_source',
     'django.template.loaders.app_directories.load_template_source',
-    'forum.skins.load_template_source',
 #     'django.template.loaders.eggs.load_template_source',
 )
 
@@ -24,11 +23,11 @@ MIDDLEWARE_CLASSES = [
     #'django.middleware.cache.FetchFromCacheMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     #'django.middleware.sqlprint.SqlPrintingMiddleware',
-    'middleware.anon_user.ConnectToSessionMessagesMiddleware',
-    'middleware.pagesize.QuestionsPageSizeMiddleware',
-    'middleware.cancel.CancelActionMiddleware',
+    'osqa.middleware.anon_user.ConnectToSessionMessagesMiddleware',
+    'osqa.middleware.pagesize.QuestionsPageSizeMiddleware',
+    'osqa.middleware.cancel.CancelActionMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
-    'recaptcha_django.middleware.ReCaptchaMiddleware',
+    #'recaptcha_django.middleware.ReCaptchaMiddleware',
     'django.middleware.transaction.TransactionMiddleware',
 ]
 
@@ -43,7 +42,7 @@ TEMPLATE_CONTEXT_PROCESSORS = (
 ROOT_URLCONF = 'urls'
 
 TEMPLATE_DIRS = (
-    os.path.join(os.path.dirname(__file__),'forum','skins').replace('\\','/'),
+    os.path.join(os.path.dirname(__file__), 'templates').replace('\\','/'),
 )
 
 #UPLOAD SETTINGS
@@ -64,28 +63,26 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.sites',
-    'django.contrib.admin',
+    #'django.contrib.admin',
     'django.contrib.humanize',
     'django.contrib.sitemaps',
-    'forum',
+    #'forum',
     'django_authopenid',
     'debug_toolbar' ,
     'user_messages',
+    'osqa',
 ]
+
+from osqa.settings import *
+
+from osqa.modules.utils import get_module_dependencies
+
+INSTALLED_APPS = list(set(INSTALLED_APPS) | set(get_module_dependencies()))
 
 AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.ModelBackend',]
 
-if USE_SPHINX_SEARCH:
-    INSTALLED_APPS.append('djangosphinx')
-
 if USE_FB_CONNECT:
     INSTALLED_APPS.append('fbconnect')
-
-if DATABASE_ENGINE in ('postgresql_psycopg2', 'postgresql', ):
-    USE_PG_FTS = True
-    INSTALLED_APPS.append('pgfulltext')
-else:
-    USE_PG_FTS = False
 
 #load optional plugin module for external password login
 if 'USE_EXTERNAL_LEGACY_LOGIN' in locals() and USE_EXTERNAL_LEGACY_LOGIN:
@@ -99,3 +96,6 @@ if 'USE_EXTERNAL_LEGACY_LOGIN' in locals() and USE_EXTERNAL_LEGACY_LOGIN:
         return __import__(EXTERNAL_LEGACY_LOGIN_MODULE, [], [], ['api','forms','views'])
 else:
     LOAD_EXTERNAL_LOGIN_APP = lambda: None
+
+
+    

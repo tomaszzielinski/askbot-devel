@@ -1,0 +1,1 @@
+ANSWER_REVISION_TEMPLATE = ('<div class="text">%(html)s</div>')
