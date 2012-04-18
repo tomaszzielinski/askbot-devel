@@ -5,9 +5,10 @@ other serializers.
 """
 
 from django.conf import settings
-from django.core.serializers import base
 from django.db import models, DEFAULT_DB_ALIAS
 from django.utils.encoding import smart_unicode, is_protected_type
+
+from . import base
 
 class Serializer(base.Serializer):
     """

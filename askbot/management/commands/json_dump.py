@@ -1,4 +1,4 @@
-# Copy of https://code.djangoproject.com/browser/django/tags/releases/1.2.7/django/core/management/commands/dumpdata.py
+# Heavily modified copy of https://code.djangoproject.com/browser/django/tags/releases/1.2.7/django/core/management/commands/dumpdata.py
 # Django license applies (https://code.djangoproject.com/browser/django/tags/releases/1.2.7/LICENSE):
 #
 #    Copyright (c) Django Software Foundation and individual contributors.
@@ -33,12 +33,14 @@ import sys
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand, CommandError
-from django.core import serializers
 from django.db import connections, router, DEFAULT_DB_ALIAS
 from django.utils.datastructures import SortedDict
 from django.conf import settings
 
 from optparse import make_option
+
+from askbot.serializers import json as json_serializer
+
 
 class Command(BaseCommand):
     option_list = BaseCommand.option_list
@@ -56,7 +58,7 @@ class Command(BaseCommand):
 
         settings.DEBUG = False # Just in case, we don't want queries to accumulate in connection.queries
 
-        app_labels = ['askbot', 'auth'] # Askbot heavily depends on Django User model so we have to dump also users
+        app_labels = ['auth', 'askbot'] # Askbot heavily depends on Django User model so we have to dump also users
 
         app_list = SortedDict()
         for app_label in app_labels:
@@ -73,12 +75,15 @@ class Command(BaseCommand):
                         yield obj
 
         try:
-            return serializers.serialize(format, get_objects(), indent=indent,
-                use_natural_keys=use_natural_keys, stream=sys.stdout)
+            json_serializer.Serializer().serialize(
+                queryset=get_objects(),
+                indent=indent,
+                use_natural_keys=use_natural_keys,
+                stream=sys.stdout
+            )
         except Exception, e:
-            if show_traceback:
-                raise
             raise CommandError("Unable to serialize database: %s" % e)
+
 
 def sort_dependencies(app_list):
     """Sort a list of app,modellist pairs into a single list of models.

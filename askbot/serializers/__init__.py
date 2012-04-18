@@ -1,4 +1,4 @@
-# This is a (partial) copy of Django 1.2.7 `serializers` package: https://code.djangoproject.com/browser/django/tags/releases/1.2.7/django/core/serializers/
+# This is a partial, modified copy of Django 1.2.7 `serializers` package: https://code.djangoproject.com/browser/django/tags/releases/1.2.7/django/core/serializers/
 # Django license applies (https://code.djangoproject.com/browser/django/tags/releases/1.2.7/LICENSE):
 #
 #    Copyright (c) Django Software Foundation and individual contributors.

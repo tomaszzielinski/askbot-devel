@@ -1,6 +1,7 @@
 from askbot import startup_procedures
 startup_procedures.run()
 
+import sys
 import logging
 import hashlib
 import datetime
@@ -2789,33 +2790,34 @@ def make_admin_if_first_user(instance, **kwargs):
         instance.set_admin_status()
     cache.cache.set('admin-created', True)
 
-#signal for User model save changes
-django_signals.pre_save.connect(make_admin_if_first_user, sender=User)
-django_signals.pre_save.connect(calculate_gravatar_hash, sender=User)
-django_signals.post_save.connect(add_missing_subscriptions, sender=User)
-django_signals.post_save.connect(record_award_event, sender=Award)
-django_signals.post_save.connect(notify_award_message, sender=Award)
-django_signals.post_save.connect(record_answer_accepted, sender=Post)
-django_signals.post_save.connect(record_vote, sender=Vote)
-django_signals.post_save.connect(record_favorite_question, sender=FavoriteQuestion)
+if sys.argv[1] not in ('json_load', 'loaddata'):
+    #signal for User model save changes
+    django_signals.pre_save.connect(make_admin_if_first_user, sender=User)
+    django_signals.pre_save.connect(calculate_gravatar_hash, sender=User)
+    django_signals.post_save.connect(add_missing_subscriptions, sender=User)
+    django_signals.post_save.connect(record_award_event, sender=Award)
+    django_signals.post_save.connect(notify_award_message, sender=Award)
+    django_signals.post_save.connect(record_answer_accepted, sender=Post)
+    django_signals.post_save.connect(record_vote, sender=Vote)
+    django_signals.post_save.connect(record_favorite_question, sender=FavoriteQuestion)
 
-if 'avatar' in django_settings.INSTALLED_APPS:
-    from avatar.models import Avatar
-    django_signals.post_save.connect(set_user_avatar_type_flag,sender=Avatar)
-    django_signals.post_delete.connect(update_user_avatar_type_flag, sender=Avatar)
+    if 'avatar' in django_settings.INSTALLED_APPS:
+        from avatar.models import Avatar
+        django_signals.post_save.connect(set_user_avatar_type_flag,sender=Avatar)
+        django_signals.post_delete.connect(update_user_avatar_type_flag, sender=Avatar)
 
-django_signals.post_delete.connect(record_cancel_vote, sender=Vote)
+    django_signals.post_delete.connect(record_cancel_vote, sender=Vote)
 
-#change this to real m2m_changed with Django1.2
-signals.delete_question_or_answer.connect(record_delete_question, sender=Post)
-signals.flag_offensive.connect(record_flag_offensive, sender=Post)
-signals.remove_flag_offensive.connect(remove_flag_offensive, sender=Post)
-signals.tags_updated.connect(record_update_tags)
-signals.user_updated.connect(record_user_full_updated, sender=User)
-signals.user_logged_in.connect(complete_pending_tag_subscriptions)#todo: add this to fake onlogin middleware
-signals.user_logged_in.connect(post_anonymous_askbot_content)
-signals.post_updated.connect(record_post_update_activity)
-signals.site_visited.connect(record_user_visit)
+    #change this to real m2m_changed with Django1.2
+    signals.delete_question_or_answer.connect(record_delete_question, sender=Post)
+    signals.flag_offensive.connect(record_flag_offensive, sender=Post)
+    signals.remove_flag_offensive.connect(remove_flag_offensive, sender=Post)
+    signals.tags_updated.connect(record_update_tags)
+    signals.user_updated.connect(record_user_full_updated, sender=User)
+    signals.user_logged_in.connect(complete_pending_tag_subscriptions)#todo: add this to fake onlogin middleware
+    signals.user_logged_in.connect(post_anonymous_askbot_content)
+    signals.post_updated.connect(record_post_update_activity)
+    signals.site_visited.connect(record_user_visit)
 
 #set up a possibility for the users to follow others
 try:

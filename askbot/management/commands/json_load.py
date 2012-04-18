@@ -1,22 +1,42 @@
+# Heavily modified copy of https://code.djangoproject.com/browser/django/tags/releases/1.2.7/django/core/management/commands/loaddata.py
+# Django license applies (https://code.djangoproject.com/browser/django/tags/releases/1.2.7/LICENSE):
+#
+#    Copyright (c) Django Software Foundation and individual contributors.
+#    All rights reserved.
+#
+#    Redistribution and use in source and binary forms, with or without modification,
+#    are permitted provided that the following conditions are met:
+#
+#    1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+#
+#    2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+#    3. Neither the name of Django nor the names of its contributors may be used
+#    to endorse or promote products derived from this software without
+#    specific prior written permission.
+#
+#    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+#    ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+#    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+#    ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+#    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+#    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+#    ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+#    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+#    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
 import sys
-import os
-import gzip
-import zipfile
 from optparse import make_option
 
-from django.conf import settings
-from django.core import serializers
 from django.core.management.base import BaseCommand
 from django.core.management.color import no_style
 from django.db import connections, router, transaction, DEFAULT_DB_ALIAS
-from django.db.models import get_apps
-from django.utils.itercompat import product
 
-try:
-    import bz2
-    has_bz2 = True
-except ImportError:
-    has_bz2 = False
+from askbot.serializers import json as json_serializer
 
 class Command(BaseCommand):
     help = 'Installs the named fixture(s) in the database.'
@@ -35,7 +55,6 @@ class Command(BaseCommand):
         self.style = no_style()
 
         verbosity = int(options.get('verbosity', 1))
-        show_traceback = options.get('traceback', False)
 
         # commit is a stealth option - it isn't really useful as
         # a command line option, but it can be useful when invoking
@@ -46,12 +65,9 @@ class Command(BaseCommand):
         commit = options.get('commit', True)
 
         # Keep a count of the installed objects and fixtures
-        fixture_count = 0
         loaded_object_count = 0
         fixture_object_count = 0
         models = set()
-
-        humanize = lambda dirname: dirname and "'%s'" % dirname or 'absolute path'
 
         # Get a cursor (even though we don't need one yet). This has
         # the side effect of initializing the test database (if
@@ -65,149 +81,45 @@ class Command(BaseCommand):
             transaction.enter_transaction_management(using=using)
             transaction.managed(True, using=using)
 
-        class SingleZipReader(zipfile.ZipFile):
-            def __init__(self, *args, **kwargs):
-                zipfile.ZipFile.__init__(self, *args, **kwargs)
-                if settings.DEBUG:
-                    assert len(self.namelist()) == 1, "Zip-compressed fixtures must contain only one file."
-            def read(self):
-                return zipfile.ZipFile.read(self, self.namelist()[0])
+        try:
+            fixture = open(sys.argv[2], 'r')
 
-        compression_types = {
-            None:   file,
-            'gz':   gzip.GzipFile,
-            'zip':  SingleZipReader
-        }
-        if has_bz2:
-            compression_types['bz2'] = bz2.BZ2File
+            objects_in_fixture = 0
+            loaded_objects_in_fixture = 0
 
-        app_module_paths = []
-        for app in get_apps():
-            if hasattr(app, '__path__'):
-                # It's a 'models/' subpackage
-                for path in app.__path__:
-                    app_module_paths.append(path)
-            else:
-                # It's a models.py module
-                app_module_paths.append(app.__file__)
+            try:
+                objects = json_serializer.Deserializer(fixture, using=using)
+                for obj in objects:
+                    objects_in_fixture += 1
+                    if router.allow_syncdb(using, obj.object.__class__):
+                        loaded_objects_in_fixture += 1
+                        models.add(obj.object.__class__)
+                        obj.save(using=using)
+                loaded_object_count += loaded_objects_in_fixture
+                fixture_object_count += objects_in_fixture
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except Exception:
+                import traceback
+                fixture.close()
+                if commit:
+                    transaction.rollback(using=using)
+                    transaction.leave_transaction_management(using=using)
+                traceback.print_exc()
+                return
+            fixture.close()
 
-        app_fixtures = [os.path.join(os.path.dirname(path), 'fixtures') for path in app_module_paths]
-        for fixture_label in fixture_labels:
-            parts = fixture_label.split('.')
-
-            if len(parts) > 1 and parts[-1] in compression_types:
-                compression_formats = [parts[-1]]
-                parts = parts[:-1]
-            else:
-                compression_formats = compression_types.keys()
-
-            if len(parts) == 1:
-                fixture_name = parts[0]
-                formats = serializers.get_public_serializer_formats()
-            else:
-                fixture_name, format = '.'.join(parts[:-1]), parts[-1]
-                if format in serializers.get_public_serializer_formats():
-                    formats = [format]
-                else:
-                    formats = []
-
-            if formats:
-                if verbosity > 1:
-                    self.stdout.write("Loading '%s' fixtures...\n" % fixture_name)
-            else:
-                self.stderr.write(
-                    self.style.ERROR("Problem installing fixture '%s': %s is not a known serialization format.\n" %
-                        (fixture_name, format)))
+            # If the fixture we loaded contains 0 objects, assume that an
+            # error was encountered during fixture loading.
+            if objects_in_fixture == 0:
+                self.stderr.write(self.style.ERROR("No fixture data found! (File format may be invalid.)\n"))
                 if commit:
                     transaction.rollback(using=using)
                     transaction.leave_transaction_management(using=using)
                 return
 
-            if os.path.isabs(fixture_name):
-                fixture_dirs = [fixture_name]
-            else:
-                fixture_dirs = app_fixtures + list(settings.FIXTURE_DIRS) + ['']
-
-            for fixture_dir in fixture_dirs:
-                if verbosity > 1:
-                    self.stdout.write("Checking %s for fixtures...\n" % humanize(fixture_dir))
-
-                label_found = False
-                for combo in product([using, None], formats, compression_formats):
-                    database, format, compression_format = combo
-                    file_name = '.'.join(
-                        p for p in [
-                            fixture_name, database, format, compression_format
-                        ]
-                        if p
-                    )
-
-                    if verbosity > 1:
-                        self.stdout.write("Trying %s for %s fixture '%s'...\n" % \
-                            (humanize(fixture_dir), file_name, fixture_name))
-                    full_path = os.path.join(fixture_dir, file_name)
-                    open_method = compression_types[compression_format]
-                    try:
-                        fixture = open_method(full_path, 'r')
-                        if label_found:
-                            fixture.close()
-                            self.stderr.write(self.style.ERROR("Multiple fixtures named '%s' in %s. Aborting.\n" %
-                                (fixture_name, humanize(fixture_dir))))
-                            if commit:
-                                transaction.rollback(using=using)
-                                transaction.leave_transaction_management(using=using)
-                            return
-                        else:
-                            fixture_count += 1
-                            objects_in_fixture = 0
-                            loaded_objects_in_fixture = 0
-                            if verbosity > 0:
-                                self.stdout.write("Installing %s fixture '%s' from %s.\n" % \
-                                    (format, fixture_name, humanize(fixture_dir)))
-                            try:
-                                objects = serializers.deserialize(format, fixture, using=using)
-                                for obj in objects:
-                                    objects_in_fixture += 1
-                                    if router.allow_syncdb(using, obj.object.__class__):
-                                        loaded_objects_in_fixture += 1
-                                        models.add(obj.object.__class__)
-                                        obj.save(using=using)
-                                loaded_object_count += loaded_objects_in_fixture
-                                fixture_object_count += objects_in_fixture
-                                label_found = True
-                            except (SystemExit, KeyboardInterrupt):
-                                raise
-                            except Exception:
-                                import traceback
-                                fixture.close()
-                                if commit:
-                                    transaction.rollback(using=using)
-                                    transaction.leave_transaction_management(using=using)
-                                if show_traceback:
-                                    traceback.print_exc()
-                                else:
-                                    self.stderr.write(
-                                        self.style.ERROR("Problem installing fixture '%s': %s\n" %
-                                             (full_path, ''.join(traceback.format_exception(sys.exc_type,
-                                                 sys.exc_value, sys.exc_traceback)))))
-                                return
-                            fixture.close()
-
-                            # If the fixture we loaded contains 0 objects, assume that an
-                            # error was encountered during fixture loading.
-                            if objects_in_fixture == 0:
-                                self.stderr.write(
-                                    self.style.ERROR("No fixture data found for '%s'. (File format may be invalid.)\n" %
-                                        (fixture_name)))
-                                if commit:
-                                    transaction.rollback(using=using)
-                                    transaction.leave_transaction_management(using=using)
-                                return
-
-                    except Exception, e:
-                        if verbosity > 1:
-                            self.stdout.write("No %s fixture '%s' in %s.\n" % \
-                                (format, fixture_name, humanize(fixture_dir)))
+        except Exception, e:
+            raise
 
         # If we found even one object in a fixture, we need to reset the
         # database sequences.
@@ -229,11 +141,10 @@ class Command(BaseCommand):
         else:
             if verbosity > 0:
                 if fixture_object_count == loaded_object_count:
-                    self.stdout.write("Installed %d object(s) from %d fixture(s)\n" % (
-                        loaded_object_count, fixture_count))
+                    self.stdout.write("Installed %d object(s)\n" % loaded_object_count)
                 else:
-                    self.stdout.write("Installed %d object(s) (of %d) from %d fixture(s)\n" % (
-                        loaded_object_count, fixture_object_count, fixture_count))
+                    self.stdout.write("Installed %d object(s) (of %d)\n" % (
+                        loaded_object_count, fixture_object_count))
 
         # Close the DB connection. This is required as a workaround for an
         # edge case in MySQL: if the same connection is used to
