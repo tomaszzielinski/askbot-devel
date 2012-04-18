@@ -29,29 +29,19 @@
 #    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 #    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
+import sys
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand, CommandError
 from django.core import serializers
 from django.db import connections, router, DEFAULT_DB_ALIAS
 from django.utils.datastructures import SortedDict
+from django.conf import settings
 
 from optparse import make_option
 
 class Command(BaseCommand):
-    option_list = BaseCommand.option_list + (
-        make_option('--format', default='json', dest='format',
-            help='Specifies the output serialization format for fixtures.'),
-        make_option('--indent', default=None, dest='indent', type='int',
-            help='Specifies the indent level to use when pretty-printing output'),
-        make_option('--database', action='store', dest='database',
-            default=DEFAULT_DB_ALIAS, help='Nominates a specific database to load '
-                                           'fixtures into. Defaults to the "default" database.'),
-        make_option('-e', '--exclude', dest='exclude',action='append', default=[],
-            help='App to exclude (use multiple --exclude to exclude multiple apps).'),
-        make_option('-n', '--natural', action='store_true', dest='use_natural_keys', default=False,
-            help='Use natural keys if they are available.'),
-        )
+    option_list = BaseCommand.option_list
     help = ("Output the contents of the database as a fixture of the given "
             "format (using each model's default manager).")
     args = '[appname appname.ModelName ...]'
@@ -59,65 +49,32 @@ class Command(BaseCommand):
     def handle(self, *app_labels, **options):
         from django.db.models import get_app, get_apps, get_models, get_model
 
-        format = options.get('format','json')
-        indent = options.get('indent',None)
-        using = options.get('database', DEFAULT_DB_ALIAS)
-        connection = connections[using]
-        exclude = options.get('exclude',[])
-        show_traceback = options.get('traceback', False)
-        use_natural_keys = options.get('use_natural_keys', False)
+        format = 'json'
+        indent = 4
+        using = DEFAULT_DB_ALIAS  # 'default'
+        use_natural_keys = True
 
-        excluded_apps = set(get_app(app_label) for app_label in exclude)
+        settings.DEBUG = False # Just in case, we don't want queries to accumulate in connection.queries
 
-        if len(app_labels) == 0:
-            app_list = SortedDict((app, None) for app in get_apps() if app not in excluded_apps)
-        else:
-            app_list = SortedDict()
-            for label in app_labels:
-                try:
-                    app_label, model_label = label.split('.')
-                    try:
-                        app = get_app(app_label)
-                    except ImproperlyConfigured:
-                        raise CommandError("Unknown application: %s" % app_label)
+        app_labels = ['askbot', 'auth'] # Askbot heavily depends on Django User model so we have to dump also users
 
-                    model = get_model(app_label, model_label)
-                    if model is None:
-                        raise CommandError("Unknown model: %s.%s" % (app_label, model_label))
+        app_list = SortedDict()
+        for app_label in app_labels:
+            app = get_app(app_label)
+            app_list[app] = None
 
-                    if app in app_list.keys():
-                        if app_list[app] and model not in app_list[app]:
-                            app_list[app].append(model)
-                    else:
-                        app_list[app] = [model]
-                except ValueError:
-                    # This is just an app - no model qualifier
-                    app_label = label
-                    try:
-                        app = get_app(app_label)
-                    except ImproperlyConfigured:
-                        raise CommandError("Unknown application: %s" % app_label)
-                    app_list[app] = None
-
-        # Check that the serialization format exists; this is a shortcut to
-        # avoid collating all the objects and _then_ failing.
-        if format not in serializers.get_public_serializer_formats():
-            raise CommandError("Unknown serialization format: %s" % format)
+        # Applied here this patch: https://code.djangoproject.com/ticket/5423
+        # -> https://code.djangoproject.com/attachment/ticket/5423/5423.5.diff
+        # TODO: Track https://code.djangoproject.com/ticket/16614
+        def get_objects():
+            for model in sort_dependencies(app_list.items()):
+                if not model._meta.proxy and router.allow_syncdb(using, model):
+                    for obj in model._default_manager.using(using).order_by(model._meta.pk.name).iterator():
+                        yield obj
 
         try:
-            serializers.get_serializer(format)
-        except KeyError:
-            raise CommandError("Unknown serialization format: %s" % format)
-
-        # Now collate the objects to be serialized.
-        objects = []
-        for model in sort_dependencies(app_list.items()):
-            if not model._meta.proxy and router.allow_syncdb(using, model):
-                objects.extend(model._default_manager.using(using).all())
-
-        try:
-            return serializers.serialize(format, objects, indent=indent,
-                use_natural_keys=use_natural_keys)
+            return serializers.serialize(format, get_objects(), indent=indent,
+                use_natural_keys=use_natural_keys, stream=sys.stdout)
         except Exception, e:
             if show_traceback:
                 raise
