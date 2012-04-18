@@ -2790,7 +2790,7 @@ def make_admin_if_first_user(instance, **kwargs):
         instance.set_admin_status()
     cache.cache.set('admin-created', True)
 
-if sys.argv[1] not in ('json_load', 'loaddata'):
+if sys.argv[1] not in ('json_load', 'loaddata'):  # dump restores need exclusive access to models, postprocessing only breaks the restore
     #signal for User model save changes
     django_signals.pre_save.connect(make_admin_if_first_user, sender=User)
     django_signals.pre_save.connect(calculate_gravatar_hash, sender=User)
