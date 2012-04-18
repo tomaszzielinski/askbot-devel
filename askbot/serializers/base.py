@@ -36,6 +36,7 @@ class Serializer(object):
         self.use_natural_keys = options.pop("use_natural_keys", False)
 
         self.start_serialization()
+        self.first = True
         for obj in queryset:
             self.start_object(obj)
             for field in obj._meta.local_fields:
@@ -51,6 +52,8 @@ class Serializer(object):
                     if self.selected_fields is None or field.attname in self.selected_fields:
                         self.handle_m2m_field(obj, field)
             self.end_object(obj)
+            if self.first:
+                self.first = False
         self.end_serialization()
         return self.getvalue()
 
